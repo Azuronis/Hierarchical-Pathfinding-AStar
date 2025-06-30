@@ -1,8 +1,11 @@
 from typing import Optional, Tuple, Dict, Set
 import random
+import pygame
+import settings
 
-Pos = Tuple[int, int]
-Color = Tuple[int, int, int]
+Pos = tuple[int, int]
+Color = tuple[int, int, int]
+Matrix_2D = list[list[int]]
 
 COLOR_PALETTE = [
     (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
@@ -24,26 +27,12 @@ class Abstraction:
 
 
 class Cluster:
-    __slots__ = ("entrances", "color_index", "meta_cluster", "abstractions")
+    __slots__ = ("entrances", "color_index", "abstractions")
 
     def __init__(self) -> None:
         self.entrances: Dict[Pos, "GraphNode"] = {}
         self.color_index: int = random.randint(0, 255)
-        self.meta_cluster: Optional["MetaCluster"] = None
         self.abstractions: Set[Abstraction] = set()
-
-    @property
-    def color(self) -> Color:
-        return COLOR_PALETTE[self.color_index]
-
-
-class MetaCluster:
-    __slots__ = ("entrances", "color_index", "clusters")
-
-    def __init__(self) -> None:
-        self.entrances: Dict[Pos, "GraphNode"] = {}
-        self.color_index: int = random.randint(0, 255)
-        self.clusters: Set[Cluster] = set()
 
     @property
     def color(self) -> Color:
@@ -51,7 +40,7 @@ class MetaCluster:
 
 
 class Chunk:
-    __slots__ = ("x", "y", "nodes", "abstractions", "color_index")
+    __slots__ = ("x", "y", "nodes", "abstractions", "color_index", "surface")
 
     def __init__(self, x: int, y: int):
         self.x: int = x
@@ -59,10 +48,23 @@ class Chunk:
         self.nodes: Dict[Pos, "Node"] = {}
         self.abstractions: Set[Abstraction] = set()
         self.color_index: int = random.randint(0, 255)
+        self.surface = pygame.Surface(
+            (settings.CHUNK_PIXEL_SIZE, settings.CHUNK_PIXEL_SIZE), pygame.SRCALPHA
+        )
 
     @property
     def color(self) -> Color:
         return COLOR_PALETTE[self.color_index]
+
+    def update_surface(self) -> None:
+        self.surface.fill((0, 0, 0, 0))
+
+        for node in self.nodes.values():
+            local_x = (node.x % settings.MAP_CHUNK_SIZE) * settings.TILE_SIZE
+            local_y = (node.y % settings.MAP_CHUNK_SIZE) * settings.TILE_SIZE
+
+            rect = pygame.Rect(local_x, local_y, settings.TILE_SIZE, settings.TILE_SIZE)
+            pygame.draw.rect(self.surface, (33, 33, 33), rect, 0)
 
 
 class MegaChunk:
@@ -73,21 +75,6 @@ class MegaChunk:
         self.y: int = y
         self.chunks: Dict[Pos, Chunk] = {}
         self.clusters: Set[Cluster] = set()
-        self.color_index: int = random.randint(0, 255)
-
-    @property
-    def color(self) -> Color:
-        return COLOR_PALETTE[self.color_index]
-
-
-class GigaChunk:
-    __slots__ = ("x", "y", "mega_chunks", "meta_clusters", "color_index")
-
-    def __init__(self, x: int, y: int):
-        self.x: int = x
-        self.y: int = y
-        self.mega_chunks: Dict[Pos, MegaChunk] = {}
-        self.meta_clusters: Set[MetaCluster] = set()
         self.color_index: int = random.randint(0, 255)
 
     @property
@@ -112,7 +99,6 @@ class GraphNode:
         "parent",
         "chunk_connections",
         "mega_chunk_connections",
-        "giga_chunk_connections",
     )
 
     def __init__(self, pos: Pos, parent: Abstraction) -> None:
@@ -120,10 +106,6 @@ class GraphNode:
         self.parent: Abstraction = parent
         self.chunk_connections: Dict[Pos, "GraphNode"] = {}
         self.mega_chunk_connections: Dict[Pos, "GraphNode"] = {}
-        self.giga_chunk_connections: Dict[Pos, "GraphNode"] = {}
 
-
-# Global dictionaries for chunk storage
 chunks: Dict[Pos, Chunk] = {}
 mega_chunks: Dict[Pos, MegaChunk] = {}
-giga_chunks: Dict[Pos, GigaChunk] = {}
