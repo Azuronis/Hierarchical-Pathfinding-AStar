@@ -1,24 +1,45 @@
 from settings import (
-    WIDTH,
-    HEIGHT,
-    SURFACE_WIDTH,
-    SURFACE_HEIGHT,
-    MAP_TILE_WIDTH,
-    MAP_TILE_HEIGHT,
-    MAP_CHUNK_SIZE,
     MAP_TILE_WIDTH,
     MAP_TILE_HEIGHT,
     TILE_SIZE,
-    CHUNK_PIXEL_SIZE,
+    BACKGROUND_COLOR,
+    NODE_COLOR,
+    CONNECTION_COLOR,
+    ENTRANCE_COLOR,
+    GRID_COLOR,
+    START_NODE_COLOR,
+    END_NODE_COLOR,
+    ENTITY_COLOR,
+    TARGET_NODE_COLOR,
+    PATH_LEVEL_0_COLOR,
+    PATH_LEVEL_1_COLOR,
+    PATH_LEVEL_2_COLOR,
+    ENTRANCE_INDICATOR_COLOR,
+    MAP_CHUNK_SIZE,
     ENTRANCE_SPACING,
+    CHUNK_PIXEL_SIZE,
+    SURFACE_WIDTH,
+    SURFACE_HEIGHT,
+    MEGA_CHUNK_SIZE,
+    MEGA_CHUNK_PIXEL_SIZE,
+    SCREEN_SCALE_FACTOR,
+    SURFACE_OFFSET,
+    PAN_SPEED,
+    FPS,
+    FONT_SIZE,
+    UI_TEXT_OFFSET,
+    NOISE_SCALE,
+    NOISE_THRESHOLD,
+    NOISE_OCTAVES,
+    PATH_LINE_WIDTH,
+    PATH_CIRCLE_RADIUS,
 )
 from utility import (
     index_1d,
     get_neighbors,
     generate_perlin_noise_map,
     get_node,
-    NodeAStar,
-    GraphAStar,
+    fill_line_with_action,
 )
 from data import (
     Node,
@@ -27,36 +48,32 @@ from data import (
     Cluster,
     Chunk,
     MegaChunk,
-    GigaChunk,
     Pos,
     Color,
     chunks,
     mega_chunks,
-    giga_chunks,
 )
 from entity import Entity
 import pygame
 from typing import Tuple, Set, List
 import time
 from collections import deque
-import pygame_gui
 import ctypes
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import math
 
 
 pygame.font.init()
 
-total = time.time()
-
 user32 = ctypes.windll.user32
 screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-WIDTH, HEIGHT = screen_width // 1.2, screen_height // 1.2
+WIDTH, HEIGHT = (
+    screen_width // SCREEN_SCALE_FACTOR,
+    screen_height // SCREEN_SCALE_FACTOR,
+)
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-manager = pygame_gui.UIManager((WIDTH, HEIGHT), theme_path=r"theme.json")
+screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=1)
 
-OFFSET = 1
+OFFSET = SURFACE_OFFSET
 OFFSET_WIDTH = SURFACE_WIDTH + OFFSET
 OFFSET_HEIGHT = SURFACE_HEIGHT + OFFSET
 
@@ -64,7 +81,6 @@ connection_surface = pygame.Surface((OFFSET_WIDTH, OFFSET_HEIGHT), pygame.SRCALP
 abstraction_surface = pygame.Surface((OFFSET_WIDTH, OFFSET_HEIGHT), pygame.SRCALPHA)
 chunk_line_surface = pygame.Surface((OFFSET_WIDTH, OFFSET_HEIGHT), pygame.SRCALPHA)
 chunk_entrance_surface = pygame.Surface((OFFSET_WIDTH, OFFSET_HEIGHT), pygame.SRCALPHA)
-
 cluster_color_surface = pygame.Surface((OFFSET_WIDTH, OFFSET_HEIGHT), pygame.SRCALPHA)
 mega_chunk_entrance_surface = pygame.Surface(
     (OFFSET_WIDTH, OFFSET_HEIGHT), pygame.SRCALPHA
@@ -72,8 +88,15 @@ mega_chunk_entrance_surface = pygame.Surface(
 mega_connection_surface = pygame.Surface((OFFSET_WIDTH, OFFSET_HEIGHT), pygame.SRCALPHA)
 mega_chunk_line_surface = pygame.Surface((OFFSET_WIDTH, OFFSET_HEIGHT), pygame.SRCALPHA)
 
+print("Generating map...")
+total_time = time.time()
+
 map_data = generate_perlin_noise_map(
-    MAP_TILE_WIDTH, MAP_TILE_HEIGHT, noise_scale=200, threshold=0.05, octaves=5
+    MAP_TILE_WIDTH,
+    MAP_TILE_HEIGHT,
+    noise_scale=NOISE_SCALE,
+    threshold=NOISE_THRESHOLD,
+    octaves=NOISE_OCTAVES,
 )
 map_data_1d = [tile for row in map_data for tile in row]
 zero_positions = {
@@ -83,12 +106,10 @@ zero_positions = {
     if map_data_1d[index_1d(x, y, MAP_TILE_WIDTH)] == 0
 }
 
-t = time.time()
 
 
 def generate_tiles(positions: Set[Pos]):
     for x, y in positions:
-
         chunk_pos = x // MAP_CHUNK_SIZE, y // MAP_CHUNK_SIZE
 
         chunk = chunks.get(chunk_pos)
@@ -97,7 +118,10 @@ def generate_tiles(positions: Set[Pos]):
             chunks[chunk_pos] = chunk
         chunk.nodes[(x, y)] = Node(x, y)
 
-        mega_chunk_pos = chunk_pos[0] // 3, chunk_pos[1] // 3
+        mega_chunk_pos = (
+            chunk_pos[0] // MEGA_CHUNK_SIZE,
+            chunk_pos[1] // MEGA_CHUNK_SIZE,
+        )
         mega_chunk = mega_chunks.get(mega_chunk_pos)
         if not mega_chunk:
             mega_chunk = MegaChunk(mega_chunk_pos[0], mega_chunk_pos[1])
@@ -105,145 +129,49 @@ def generate_tiles(positions: Set[Pos]):
         if chunk_pos not in mega_chunk.chunks:
             mega_chunk.chunks[chunk_pos] = chunk
 
-        giga_chunk_pos = mega_chunk_pos[0] // 3, mega_chunk_pos[1] // 3
-        giga_chunk = giga_chunks.get(giga_chunk_pos)
-        if not giga_chunk:
-            giga_chunk = GigaChunk(giga_chunk_pos[0], giga_chunk_pos[1])
-            giga_chunks[giga_chunk_pos] = giga_chunk
-        if mega_chunk_pos not in giga_chunk.mega_chunks:
-            giga_chunk.mega_chunks[mega_chunk_pos] = mega_chunk
 
 
-generate_tiles(zero_positions)
-dt = time.time() - t
-print(f"- Tiles generated. Took {dt} seconds")
+def flood_fill_chunk(chunk: Chunk):
+    chunk.abstractions.clear()
 
+    for node in chunk.nodes.values():
+        node.abstraction = None
+        node.connections.clear()
 
-def draw_chunk_grid():
-    # Draw vertical lines
-    for chunk_x in range(0, MAP_TILE_WIDTH // MAP_CHUNK_SIZE + 1):
-        x = chunk_x * CHUNK_PIXEL_SIZE
-        pygame.draw.line(
-            chunk_line_surface, (66, 66, 66), (x, 0), (x, SURFACE_HEIGHT), 1
-        )
-        x *= 3
-        pygame.draw.line(
-            mega_chunk_line_surface, (66, 66, 66), (x, 0), (x, SURFACE_HEIGHT), 1
-        )
+    chunk_nodes = list(chunk.nodes.keys())
+    visited = set()
 
-    # Draw horizontal lines
-    for chunk_y in range(0, MAP_TILE_HEIGHT // MAP_CHUNK_SIZE + 1):
-        y = chunk_y * CHUNK_PIXEL_SIZE
-        pygame.draw.line(
-            chunk_line_surface, (66, 66, 66), (0, y), (SURFACE_WIDTH, y), 1
-        )
-        y *= 3
-        pygame.draw.line(
-            mega_chunk_line_surface, (66, 66, 66), (0, y), (SURFACE_WIDTH, y), 1
-        )
+    while chunk_nodes:
+        start_pos = chunk_nodes.pop()
+        if start_pos in visited:
+            continue
 
+        queue = deque([start_pos])
+        abstraction = Abstraction()
+        chunk.abstractions.add(abstraction)
 
-draw_chunk_grid()
-
-t = time.time()
-
-class ThreadedFloodFill:
-    def __init__(self, chunks, get_neighbors_func):
-        self.chunks = chunks
-        self.get_neighbors = get_neighbors_func
-
-    def flood_fill_chunk_thread(self, chunk):
-        """Thread-safe flood fill for a single chunk"""
-
-        chunk_nodes = list(chunk.nodes.keys())
-        visited = set()
-
-        while chunk_nodes:
-            start_pos = chunk_nodes.pop()
-
-            if start_pos in visited:
+        while queue:
+            node_pos = queue.popleft()
+            if node_pos in visited:
                 continue
 
-            queue = deque([start_pos])
-            abstraction = Abstraction()
-            chunk.abstractions.add(abstraction)
+            visited.add(node_pos)
+            node = chunk.nodes[node_pos]
+            node.abstraction = abstraction
 
-            while queue:
-                node_pos = queue.popleft()
-
-                if node_pos in visited:
-                    continue
-
-                visited.add(node_pos)
-                node = chunk.nodes[node_pos]
-                node.abstraction = abstraction
-
-                for neighbor_pos in self.get_neighbors(node.x, node.y):
-                    if neighbor_pos in chunk.nodes and neighbor_pos not in visited:
-                        queue.append(neighbor_pos)
-                        neighbor_node = chunk.nodes.get(neighbor_pos)
-                        if neighbor_node:
-                            # Bidirectional connections
-                            node.connections[neighbor_pos] = neighbor_node
-                            neighbor_node.connections[node_pos] = node
-
-    def parallel_flood_fill(self, max_workers=None):
-        """Perform flood fill on all chunks using threading"""
-        if max_workers is None:
-            max_workers = min(os.cpu_count() or 4, 8)
-
-        chunk_list = list(self.chunks.values())
-        total_chunks = len(chunk_list)
-
-        print(f"Processing {total_chunks} chunks with {max_workers} threads...")
-
-        start_time = time.time()
-        completed = 0
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_chunk = {
-                executor.submit(self.flood_fill_chunk_thread, chunk): chunk
-                for chunk in chunk_list
-            }
-            for future in as_completed(future_to_chunk):
-                chunk = future_to_chunk[future]
-                try:
-                    future.result()
-                    completed += 1
-
-                    if completed % 10 == 0:
-                        elapsed = time.time() - start_time
-                        rate = completed / elapsed
-                        remaining = (total_chunks - completed) / rate
-                        print(
-                            f"Progress: {completed}/{total_chunks} chunks "
-                            f"({completed/total_chunks*100:.1f}%) - "
-                            f"ETA: {remaining:.1f}s"
+            for neighbor_pos in get_neighbors(node.x, node.y):
+                if neighbor_pos in chunk.nodes and neighbor_pos not in visited:
+                    queue.append(neighbor_pos)
+                    neighbor_node = chunk.nodes.get(neighbor_pos)
+                    if neighbor_node:
+                        node.connections[neighbor_pos] = (
+                            neighbor_node
                         )
-
-                except Exception as e:
-                    print(f"Error processing chunk at {chunk.x}, {chunk.y}: {e}")
-
-        elapsed = time.time() - start_time
-        print(
-            f"Completed flood fill for {total_chunks} chunks in {elapsed:.2f} seconds"
-        )
-
-
-threaded_fill = ThreadedFloodFill(chunks, get_neighbors)
-threaded_fill.parallel_flood_fill()
-
-dt = time.time() - t
-print(f"- Chunks flood filled. Took {dt} seconds")
-
-
-t = time.time()
+                        neighbor_node.connections[node_pos] = node
 
 
 def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
-
     chunk = chunks[chunk_pos]
-
     edge_range = range(MAP_CHUNK_SIZE)
 
     if direction == "top":
@@ -253,7 +181,6 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
         candidate_pairs = [
             ((start_x + x, start_y), (start_x + x, neighbor_y)) for x in edge_range
         ]
-
     elif direction == "bottom":
         neighbor_pos = (chunk_pos[0], chunk_pos[1] + 1)
         start_x, start_y = (
@@ -264,7 +191,6 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
         candidate_pairs = [
             ((start_x + x, start_y), (start_x + x, neighbor_y)) for x in edge_range
         ]
-
     elif direction == "left":
         neighbor_pos = (chunk_pos[0] - 1, chunk_pos[1])
         start_x, start_y = chunk_pos[0] * MAP_CHUNK_SIZE, chunk_pos[1] * MAP_CHUNK_SIZE
@@ -272,7 +198,6 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
         candidate_pairs = [
             ((start_x, start_y + y), (neighbor_x, start_y + y)) for y in edge_range
         ]
-
     elif direction == "right":
         neighbor_pos = (chunk_pos[0] + 1, chunk_pos[1])
         start_x, start_y = (chunk_pos[0] + 1) * MAP_CHUNK_SIZE - 1, chunk_pos[
@@ -282,6 +207,8 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
         candidate_pairs = [
             ((start_x, start_y + y), (neighbor_x, start_y + y)) for y in edge_range
         ]
+    else:
+        return
 
     neighbor_chunk = chunks.get(neighbor_pos)
     if not neighbor_chunk:
@@ -314,16 +241,15 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
             chunk_node = chunk.nodes.get(chunk_node_pos)
             neighbor_node = neighbor_chunk.nodes.get(neighbor_node_pos)
 
-            if chunk_node is None or neighbor_node is None:
+            if not chunk_node or not neighbor_node:
                 continue
 
             chunk_abstract = chunk_node.abstraction
             neighbor_abstract = neighbor_node.abstraction
 
-            assert chunk_abstract is not None
-            assert neighbor_abstract is not None
-
-            # Check if a GraphNode already exists at the chunk_node_pos
+            if not chunk_abstract or not neighbor_abstract:
+                continue
+            
             chunk_graph_node = chunk_abstract.entrances.get(chunk_node_pos)
             if not chunk_graph_node:
                 chunk_graph_node = GraphNode(chunk_node_pos, chunk_abstract)
@@ -331,7 +257,6 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
                     chunk_graph_node
                 )
 
-            # Check if a GraphNode already exists at the neighbor_node_pos
             neighbor_graph_node = neighbor_abstract.entrances.get(neighbor_node_pos)
             if not neighbor_graph_node:
                 neighbor_graph_node = GraphNode(neighbor_node_pos, neighbor_abstract)
@@ -339,7 +264,6 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
                     (neighbor_graph_node.x, neighbor_graph_node.y)
                 ] = neighbor_graph_node
 
-            # Add connections between the graph nodes
             chunk_graph_node.chunk_connections[
                 (neighbor_graph_node.x, neighbor_graph_node.y)
             ] = neighbor_graph_node
@@ -348,45 +272,29 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
             ] = chunk_graph_node
 
 
-def generate_entrances() -> None:
-    for cx, cy in chunks.keys():
-        make_chunk_entrances((cx, cy), "top")
-        make_chunk_entrances((cx, cy), "right")
-        make_chunk_entrances((cx, cy), "bottom")
-        make_chunk_entrances((cx, cy), "left")
+def generate_entrances(chunk: Chunk) -> None:
+    for abstraction in chunk.abstractions:
+        abstraction.entrances.clear()
 
-
-generate_entrances()
-
-dt = time.time() - t
-print(f"- Chunk entrances generated. Took {dt} seconds")
-
-t = time.time()
+    cx, cy = chunk.x, chunk.y
+    make_chunk_entrances((cx, cy), "top")
+    make_chunk_entrances((cx, cy), "right")
+    make_chunk_entrances((cx, cy), "bottom")
+    make_chunk_entrances((cx, cy), "left")
 
 
 def make_connections(chunk: Chunk) -> None:
     for abstraction in chunk.abstractions:
-        for entrance in abstraction.entrances.values():
-            e_x, e_y = entrance.x, entrance.y
-
-            for other_entrance in abstraction.entrances.values():
-                o_x, o_y = other_entrance.x, other_entrance.y
-                if entrance == other_entrance:
-                    continue
-                other_entrance.chunk_connections[(e_x, e_y)] = entrance
-                entrance.chunk_connections[(o_x, o_y)] = other_entrance
-
-
-for chunk in chunks.values():
-    make_connections(chunk)
-dt = time.time() - t
-print(f"- Connections generated. Took {dt} seconds")
-
-
-t = time.time()
-
+        entrances_list = list(abstraction.entrances.values())
+        for i, entrance in enumerate(entrances_list):
+            for j, other_entrance in enumerate(entrances_list):
+                if i != j:
+                    entrance.chunk_connections[(other_entrance.x, other_entrance.y)] = (
+                        other_entrance
+                    )
 
 def generate_clusters(mega_chunk: MegaChunk) -> Set[Cluster]:
+
     all_entrances: Set[GraphNode] = set()
     clusters: set[Cluster] = set()
 
@@ -399,7 +307,6 @@ def generate_clusters(mega_chunk: MegaChunk) -> Set[Cluster]:
                 clusters.add(cluster)
             else:
                 all_entrances.update(abstraction.entrances.values())
-
     processed_entrances: set[GraphNode] = set()
 
     while all_entrances:
@@ -418,8 +325,8 @@ def generate_clusters(mega_chunk: MegaChunk) -> Set[Cluster]:
                 continue
 
             processed_entrances.add(entrance)
-
             cluster.abstractions.add(abstraction)
+
             for connected_entrance in entrance.chunk_connections.values():
                 if (
                     connected_entrance not in processed_entrances
@@ -427,24 +334,17 @@ def generate_clusters(mega_chunk: MegaChunk) -> Set[Cluster]:
                 ):
                     all_entrances.discard(connected_entrance)
                     queue.append(connected_entrance)
+
     return clusters
 
 
-for mega_chunk in mega_chunks.values():
-    clusters: Set[Cluster] = generate_clusters(mega_chunk)
-    mega_chunk.clusters = clusters
-dt = time.time() - t
-print(f"- Clusters generated. Took {dt} seconds")
-
-
 def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
-    edge_range = range(MAP_CHUNK_SIZE * 3)
+    edge_range = range(MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE)
 
-    # generate possible chunk candidates
     if direction == "top":
         start_x, start_y = (
-            mega_chunk_pos[0] * 3 * MAP_CHUNK_SIZE,
-            mega_chunk_pos[1] * 3 * MAP_CHUNK_SIZE,
+            mega_chunk_pos[0] * MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE,
+            mega_chunk_pos[1] * MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE,
         )
         neighbor_y = start_y - 1
         candidate_pairs = [
@@ -452,8 +352,8 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
         ]
     elif direction == "bottom":
         start_x, start_y = (
-            mega_chunk_pos[0] * 3 * MAP_CHUNK_SIZE,
-            (mega_chunk_pos[1] + 1) * 3 * MAP_CHUNK_SIZE - 1,
+            mega_chunk_pos[0] * MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE,
+            (mega_chunk_pos[1] + 1) * MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE - 1,
         )
         neighbor_y = start_y + 1
         candidate_pairs = [
@@ -461,8 +361,8 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
         ]
     elif direction == "left":
         start_x, start_y = (
-            mega_chunk_pos[0] * 3 * MAP_CHUNK_SIZE,
-            mega_chunk_pos[1] * 3 * MAP_CHUNK_SIZE,
+            mega_chunk_pos[0] * MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE,
+            mega_chunk_pos[1] * MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE,
         )
         neighbor_x = start_x - 1
         candidate_pairs = [
@@ -470,12 +370,15 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
         ]
     elif direction == "right":
         start_x, start_y = (
-            mega_chunk_pos[0] + 1
-        ) * 3 * MAP_CHUNK_SIZE - 1, mega_chunk_pos[1] * 3 * MAP_CHUNK_SIZE
+            (mega_chunk_pos[0] + 1) * MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE - 1,
+            mega_chunk_pos[1] * MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE,
+        )
         neighbor_x = start_x + 1
         candidate_pairs = [
             ((start_x, start_y + y), (neighbor_x, start_y + y)) for y in edge_range
         ]
+    else:
+        return
 
     pairs = []
     for pair in candidate_pairs:
@@ -485,9 +388,7 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
 
     groups = []
     current_group = []
-    sorted_pairs = sorted(
-        pairs, key=lambda x: (x[0][0], x[0][1])
-    )  # Sort by x,y coordinates
+    sorted_pairs = sorted(pairs, key=lambda x: (x[0][0], x[0][1]))
 
     for i in range(len(sorted_pairs)):
         current_pair = sorted_pairs[i]
@@ -495,7 +396,6 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
             current_group.append(current_pair)
             continue
 
-        # Check if current pair is adjacent to last pair in current group
         last_pair = current_group[-1]
         if (
             abs(current_pair[0][0] - last_pair[1][0]) <= 1
@@ -508,44 +408,34 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
 
     if current_group:
         groups.append(current_group)
-    entrance_groups = []
+
     for group in groups:
         entrance_nodes = []
         for pair in group:
             node_pos, neighbor_pos = pair
             node = get_node(node_pos)
             neighbor = get_node(neighbor_pos)
+
             if node and neighbor:
                 abstract = node.abstraction
                 neighbor_abstract = neighbor.abstraction
+
                 if (
                     abstract
                     and neighbor_abstract
                     and node_pos in abstract.entrances
                     and neighbor_pos in neighbor_abstract.entrances
                 ):
+
                     entrance = abstract.entrances[node_pos]
                     neighbor_entrance = neighbor_abstract.entrances[neighbor_pos]
                     entrance_nodes.append((entrance, neighbor_entrance))
 
-                    graph_node: GraphNode = abstract.entrances[node_pos]
-                    neighbor_graph_node: GraphNode = neighbor_abstract.entrances[
-                        neighbor_pos
-                    ]
+        if not entrance_nodes:
+            continue
 
-                    graph_node.mega_chunk_connections[
-                        (neighbor_graph_node.x, neighbor_graph_node.y)
-                    ] = neighbor_graph_node
-                    neighbor_graph_node.mega_chunk_connections[
-                        (graph_node.x, graph_node.y)
-                    ] = graph_node
-
-        entrance_groups.append(entrance_nodes)
-    filtered_entrance_groups = []
-
-    for entrance_group in entrance_groups:
-        graph_nodes = [node[0] for node in entrance_group]
-        neighor_nodes = [node[1] for node in entrance_group]
+        graph_nodes = [node[0] for node in entrance_nodes]
+        neighbor_nodes = [node[1] for node in entrance_nodes]
 
         avg_x = sum(entrance.x for entrance in graph_nodes) / len(graph_nodes)
         avg_y = sum(entrance.y for entrance in graph_nodes) / len(graph_nodes)
@@ -553,169 +443,493 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
             graph_nodes, key=lambda e: ((e.x - avg_x) ** 2 + (e.y - avg_y) ** 2)
         )
 
-        neighbor_entrance = neighor_nodes[graph_nodes.index(centroid_entrance)]
-        filtered_entrance_groups.append((centroid_entrance, neighbor_entrance))
+        neighbor_entrance = neighbor_nodes[graph_nodes.index(centroid_entrance)]
 
-    entrance_groups = filtered_entrance_groups
+        centroid_entrance.mega_chunk_connections[
+            (neighbor_entrance.x, neighbor_entrance.y)
+        ] = neighbor_entrance
+        neighbor_entrance.mega_chunk_connections[
+            (centroid_entrance.x, centroid_entrance.y)
+        ] = centroid_entrance
 
-    # Draw centroids in white
-    for entrance_pair in entrance_groups:
-        entrance, neighor_entrance = entrance_pair
+        if centroid_entrance.parent.cluster:
+            centroid_entrance.parent.cluster.entrances[
+                (centroid_entrance.x, centroid_entrance.y)
+            ] = centroid_entrance
 
-        entrance.mega_chunk_connections[(neighor_entrance.x, neighor_entrance.y)] = (
-            neighor_entrance
-        )
-        neighor_entrance.mega_chunk_connections[(entrance.x, entrance.y)] = entrance
 
-        abstraction = entrance.parent
-        cluster = abstraction.cluster
-        if cluster:
-            cluster.entrances[(entrance.x, entrance.y)] = entrance
-            rect = pygame.Rect(
-                entrance.x * TILE_SIZE, entrance.y * TILE_SIZE, TILE_SIZE, TILE_SIZE
+def generate_mega_entrances(mega_chunk: MegaChunk) -> None:
+    for cluster in mega_chunk.clusters:
+        cluster.entrances.clear()
+
+    cx, cy = mega_chunk.x, mega_chunk.y
+    make_mega_chunk_entrances((cx, cy), "top")
+    make_mega_chunk_entrances((cx, cy), "right")
+    make_mega_chunk_entrances((cx, cy), "bottom")
+    make_mega_chunk_entrances((cx, cy), "left")
+
+
+def update_mega_chunk_connections(mega_chunk: MegaChunk) -> None:
+    all_entrances = []
+    for cluster in mega_chunk.clusters:
+        all_entrances.extend(cluster.entrances.values())
+
+    for entrance in all_entrances:
+        external_connections = {}
+        for pos, connected in entrance.mega_chunk_connections.items():
+            connected_mega_pos = (
+                connected.x // (MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE),
+                connected.y // (MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE),
             )
-            pygame.draw.rect(mega_connection_surface, (255, 255, 255), rect, 1)
+            if connected_mega_pos != (mega_chunk.x, mega_chunk.y):
+                external_connections[pos] = connected
+        entrance.mega_chunk_connections = external_connections
 
-        line = (
-            entrance.x * TILE_SIZE + TILE_SIZE // 2,
-            entrance.y * TILE_SIZE + TILE_SIZE // 2,
-        ), (
-            neighor_entrance.x * TILE_SIZE + TILE_SIZE // 2,
-            neighor_entrance.y * TILE_SIZE + TILE_SIZE // 2,
+    for cluster in mega_chunk.clusters:
+        cluster_entrances = list(cluster.entrances.values())
+
+        for start_entrance in cluster_entrances:
+            visited = set()
+            queue = deque([start_entrance])
+
+            while queue:
+                current_entrance = queue.popleft()
+
+                if current_entrance in visited:
+                    continue
+
+                visited.add(current_entrance)
+                
+                for other_entrance in cluster_entrances:
+                    if other_entrance != current_entrance:
+                        current_entrance.mega_chunk_connections[
+                            (other_entrance.x, other_entrance.y)
+                        ] = other_entrance
+
+                for connected in current_entrance.chunk_connections.values():
+                    if connected in cluster_entrances and connected not in visited:
+                        queue.append(connected)
+
+def add_node(tile_pos: Pos) -> bool:
+    existing_node = get_node(tile_pos)
+    if existing_node:
+        return False
+
+    zero_positions.add(tile_pos)
+
+    chunk_pos = (tile_pos[0] // MAP_CHUNK_SIZE, tile_pos[1] // MAP_CHUNK_SIZE)
+    chunk = chunks.get(chunk_pos)
+
+    if not chunk:
+        chunk = Chunk(chunk_pos[0], chunk_pos[1])
+        chunks[chunk_pos] = chunk
+
+    mega_chunk_pos = chunk_pos[0] // MEGA_CHUNK_SIZE, chunk_pos[1] // MEGA_CHUNK_SIZE
+    mega_chunk = mega_chunks.get(mega_chunk_pos)
+
+    if not mega_chunk:
+        mega_chunk = MegaChunk(mega_chunk_pos[0], mega_chunk_pos[1])
+        mega_chunks[mega_chunk_pos] = mega_chunk
+
+    if chunk_pos not in mega_chunk.chunks:
+        mega_chunk.chunks[chunk_pos] = chunk
+
+    affected_mega_chunks = set()
+    affected_mega_chunks.add(mega_chunk)
+
+    new_node = Node(tile_pos[0], tile_pos[1])
+    chunk.nodes[tile_pos] = new_node
+
+    flood_fill_chunk(chunk)
+    generate_entrances(chunk)
+    make_connections(chunk)
+
+    neighbor_chunks_to_update = set()
+    for neighbor_pos in get_neighbors(tile_pos[0], tile_pos[1]):
+        neighbor_chunk_pos = (
+            neighbor_pos[0] // MAP_CHUNK_SIZE,
+            neighbor_pos[1] // MAP_CHUNK_SIZE,
         )
-        pygame.draw.line(mega_connection_surface, (255, 255, 255), line[0], line[1], 1)
+        if neighbor_chunk_pos != chunk_pos:
+            neighbor_chunks_to_update.add(neighbor_chunk_pos)
+
+    for neighbor_chunk_pos in neighbor_chunks_to_update:
+        neighbor_chunk = chunks.get(neighbor_chunk_pos)
+        if neighbor_chunk:
+            flood_fill_chunk(neighbor_chunk)
+            generate_entrances(neighbor_chunk)
+            make_connections(neighbor_chunk)
+
+            neighbor_mega_chunk_pos = (
+                neighbor_chunk_pos[0] // MEGA_CHUNK_SIZE,
+                neighbor_chunk_pos[1] // MEGA_CHUNK_SIZE,
+            )
+            neighbor_mega_chunk = mega_chunks.get(neighbor_mega_chunk_pos)
+            if neighbor_mega_chunk and neighbor_mega_chunk not in affected_mega_chunks:
+                affected_mega_chunks.add(neighbor_mega_chunk)
+
+    for affected_mega_chunk in affected_mega_chunks:
+        clusters = generate_clusters(affected_mega_chunk)
+        affected_mega_chunk.clusters = clusters
+        generate_mega_entrances(affected_mega_chunk)
+        update_mega_chunk_connections(affected_mega_chunk)
+
+    tile_rect = pygame.Rect(
+        (tile_pos[0] % MAP_CHUNK_SIZE) * TILE_SIZE,
+        (tile_pos[1] % MAP_CHUNK_SIZE) * TILE_SIZE,
+        TILE_SIZE,
+        TILE_SIZE,
+    )
+    pygame.draw.rect(chunk.surface, NODE_COLOR, tile_rect, 0)
+
+    world_tile_rect = pygame.Rect(
+        tile_pos[0] * TILE_SIZE, tile_pos[1] * TILE_SIZE, TILE_SIZE, TILE_SIZE
+    )
+    pygame.draw.rect(cluster_color_surface, NODE_COLOR, world_tile_rect, 0)
+
+    existing_chunks = [chunk_pos] + [
+        pos for pos in neighbor_chunks_to_update if chunks.get(pos)
+    ]
+    redraw_affected_areas(existing_chunks, affected_mega_chunks)
+
+    for affected_chunk_pos in existing_chunks:
+        affected_chunk = chunks.get(affected_chunk_pos)
+        if affected_chunk:
+            affected_chunk.update_surface()
+            abstraction_surface.blit(
+                affected_chunk.surface,
+                (
+                    affected_chunk.x * CHUNK_PIXEL_SIZE,
+                    affected_chunk.y * CHUNK_PIXEL_SIZE,
+                ),
+            )
+
+    return True
 
 
-def generate_mega_entrances() -> None:
-    for cx, cy in mega_chunks.keys():
-        make_mega_chunk_entrances((cx, cy), "top")
-        make_mega_chunk_entrances((cx, cy), "right")
-        make_mega_chunk_entrances((cx, cy), "bottom")
-        make_mega_chunk_entrances((cx, cy), "left")
+# === NODE REMOVAL ===
+def remove_node(tile_pos: Pos) -> bool:
+    node = get_node(tile_pos)
+    if not node:
+        return False
+
+    zero_positions.discard(tile_pos)
+
+    chunk_pos = (node.x // MAP_CHUNK_SIZE, node.y // MAP_CHUNK_SIZE)
+    chunk = chunks.get(chunk_pos)
+
+    if not chunk:
+        print(f"Warning: Node exists but chunk doesn't at {chunk_pos}")
+        return False
+
+    mega_chunk_pos = chunk_pos[0] // MEGA_CHUNK_SIZE, chunk_pos[1] // MEGA_CHUNK_SIZE
+    mega_chunk = mega_chunks.get(mega_chunk_pos)
+
+    if not mega_chunk:
+        print(f"Warning: Chunk exists but mega chunk doesn't at {mega_chunk_pos}")
+        return False
+
+    affected_mega_chunks = set()
+    affected_mega_chunks.add(mega_chunk)
+
+    removed_node = chunk.nodes.pop(tile_pos, None)
+    if not removed_node:
+        return False
+
+    flood_fill_chunk(chunk)
+    generate_entrances(chunk)
+    make_connections(chunk)
+
+    neighbor_chunks_to_update = set()
+    for neighbor_pos in get_neighbors(node.x, node.y):
+        neighbor_chunk_pos = (
+            neighbor_pos[0] // MAP_CHUNK_SIZE,
+            neighbor_pos[1] // MAP_CHUNK_SIZE,
+        )
+        if neighbor_chunk_pos != chunk_pos:
+            neighbor_chunks_to_update.add(neighbor_chunk_pos)
+
+    for neighbor_chunk_pos in neighbor_chunks_to_update:
+        neighbor_chunk = chunks.get(neighbor_chunk_pos)
+        if neighbor_chunk:
+            flood_fill_chunk(neighbor_chunk)
+            generate_entrances(neighbor_chunk)
+            make_connections(neighbor_chunk)
+
+            neighbor_mega_chunk_pos = (
+                neighbor_chunk_pos[0] // MEGA_CHUNK_SIZE,
+                neighbor_chunk_pos[1] // MEGA_CHUNK_SIZE,
+            )
+            neighbor_mega_chunk = mega_chunks.get(neighbor_mega_chunk_pos)
+            if neighbor_mega_chunk and neighbor_mega_chunk not in affected_mega_chunks:
+                affected_mega_chunks.add(neighbor_mega_chunk)
+
+    for affected_mega_chunk in affected_mega_chunks:
+        clusters = generate_clusters(affected_mega_chunk)
+        affected_mega_chunk.clusters = clusters
+        generate_mega_entrances(affected_mega_chunk)
+        update_mega_chunk_connections(affected_mega_chunk)
+
+    tile_rect = pygame.Rect(
+        (tile_pos[0] % MAP_CHUNK_SIZE) * TILE_SIZE,
+        (tile_pos[1] % MAP_CHUNK_SIZE) * TILE_SIZE,
+        TILE_SIZE,
+        TILE_SIZE,
+    )
+    chunk.surface.fill(BACKGROUND_COLOR, tile_rect)
+
+    world_tile_rect = pygame.Rect(
+        tile_pos[0] * TILE_SIZE, tile_pos[1] * TILE_SIZE, TILE_SIZE, TILE_SIZE
+    )
+    abstraction_surface.fill(BACKGROUND_COLOR, world_tile_rect)
+    cluster_color_surface.fill(BACKGROUND_COLOR, world_tile_rect)
+
+    existing_chunks = [chunk_pos] + [
+        pos for pos in neighbor_chunks_to_update if chunks.get(pos)
+    ]
+    redraw_affected_areas(existing_chunks, affected_mega_chunks)
+
+    for affected_chunk_pos in existing_chunks:
+        affected_chunk = chunks.get(affected_chunk_pos)
+        if affected_chunk:
+            affected_chunk.update_surface()
+            abstraction_surface.blit(
+                affected_chunk.surface,
+                (
+                    affected_chunk.x * CHUNK_PIXEL_SIZE,
+                    affected_chunk.y * CHUNK_PIXEL_SIZE,
+                ),
+            )
+    return True
 
 
-generate_mega_entrances()
+def redraw_affected_areas(affected_chunk_positions: list, affected_mega_chunks: set):
+    for chunk_pos in affected_chunk_positions:
+        chunk = chunks.get(chunk_pos)
+        if not chunk:
+            continue
 
-dt = time.time() - t
-print(f"- Mega Chunk entrances generated. Took {dt} seconds")
+        chunk_rect = pygame.Rect(
+            chunk.x * CHUNK_PIXEL_SIZE,
+            chunk.y * CHUNK_PIXEL_SIZE,
+            CHUNK_PIXEL_SIZE,
+            CHUNK_PIXEL_SIZE,
+        )
+        chunk_entrance_surface.fill(BACKGROUND_COLOR, chunk_rect)
+        connection_surface.fill(BACKGROUND_COLOR, chunk_rect)
 
+        for abstraction in chunk.abstractions:
+            for entrance in abstraction.entrances.values():
+                rect = pygame.Rect(
+                    entrance.x * TILE_SIZE, entrance.y * TILE_SIZE, TILE_SIZE, TILE_SIZE
+                )
+                pygame.draw.rect(chunk_entrance_surface, ENTRANCE_COLOR, rect, 1)
 
-def make_mega_chunk_connections() -> None:
-    for mega_chunk in mega_chunks.values():
-        for cluster in mega_chunk.clusters:
-            for entrance in cluster.entrances.values():
-                for other_entrance in cluster.entrances.values():
-                    if entrance == other_entrance:
-                        continue
-
-                    entrance.mega_chunk_connections[
-                        (other_entrance.x, other_entrance.y)
-                    ] = other_entrance
-                    other_entrance.mega_chunk_connections[(entrance.x, entrance.y)] = (
-                        entrance
+                for connected_entrance in entrance.chunk_connections.values():
+                    e_center = (
+                        entrance.x * TILE_SIZE + TILE_SIZE // 2,
+                        entrance.y * TILE_SIZE + TILE_SIZE // 2,
+                    )
+                    c_center = (
+                        connected_entrance.x * TILE_SIZE + TILE_SIZE // 2,
+                        connected_entrance.y * TILE_SIZE + TILE_SIZE // 2,
+                    )
+                    pygame.draw.line(
+                        connection_surface,
+                        CONNECTION_COLOR,
+                        e_center,
+                        c_center,
+                        PATH_LINE_WIDTH,
                     )
 
+    for mega_chunk in affected_mega_chunks:
+        mega_chunk_rect = pygame.Rect(
+            mega_chunk.x * MEGA_CHUNK_PIXEL_SIZE,
+            mega_chunk.y * MEGA_CHUNK_PIXEL_SIZE,
+            MEGA_CHUNK_PIXEL_SIZE,
+            MEGA_CHUNK_PIXEL_SIZE,
+        )
+        mega_chunk_entrance_surface.fill(BACKGROUND_COLOR, mega_chunk_rect)
+        mega_connection_surface.fill(BACKGROUND_COLOR, mega_chunk_rect)
 
-make_mega_chunk_connections()
-
-
-for mega_chunk in mega_chunks.values():
-    for chunk in mega_chunk.chunks.values():
-        for node in chunk.nodes.values():
-            rect = pygame.Rect(
-                node.x * TILE_SIZE, node.y * TILE_SIZE, TILE_SIZE, TILE_SIZE
-            )
-            assert node.abstraction != None
-            assert node.abstraction.cluster != None
-            # pygame.draw.rect(cluster_color_surface, node.abstraction.cluster.color, rect, 0)
-            pygame.draw.rect(cluster_color_surface, (33, 33, 33), rect, 0)
-
-
-t = time.time()
-
-
-def draw_mega_entrances():
-    for mega_chunk in mega_chunks.values():
+        drawn_connections = set()
         for cluster in mega_chunk.clusters:
             for entrance in cluster.entrances.values():
                 rect = pygame.Rect(
                     entrance.x * TILE_SIZE, entrance.y * TILE_SIZE, TILE_SIZE, TILE_SIZE
                 )
-                pygame.draw.rect(mega_chunk_entrance_surface, (255, 255, 255), rect, 1)
+                pygame.draw.rect(mega_chunk_entrance_surface, ENTRANCE_COLOR, rect, 1)
 
+                e_center = (
+                    entrance.x * TILE_SIZE + TILE_SIZE // 2,
+                    entrance.y * TILE_SIZE + TILE_SIZE // 2,
+                )
 
-def draw_chunk_connections():
-    for chunk in chunks.values():
-        for abstraction in chunk.abstractions:
-            for entrance in abstraction.entrances.values():
-                for connected_entrance in entrance.chunk_connections.values():
-                    e_x, e_y = entrance.x, entrance.y
-                    c_x, c_y = connected_entrance.x, connected_entrance.y
-                    e_center = (
-                        e_x * TILE_SIZE + TILE_SIZE // 2,
-                        e_y * TILE_SIZE + TILE_SIZE // 2,
-                    )
-                    c_center = (
-                        c_x * TILE_SIZE + TILE_SIZE // 2,
-                        c_y * TILE_SIZE + TILE_SIZE // 2,
-                    )
-                    pygame.draw.line(
-                        connection_surface, (0, 255, 0), e_center, c_center, 1
-                    )
-
-
-def draw_mega_connections():
-    for mega_chunk in mega_chunks.values():
-        for cluster in mega_chunk.clusters:
-            for entrance in cluster.entrances.values():
                 for other_entrance in entrance.mega_chunk_connections.values():
-                    e_x, e_y = entrance.x, entrance.y
-                    c_x, c_y = other_entrance.x, other_entrance.y
-                    e_center = (
-                        e_x * TILE_SIZE + TILE_SIZE // 2,
-                        e_y * TILE_SIZE + TILE_SIZE // 2,
-                    )
-                    c_center = (
-                        c_x * TILE_SIZE + TILE_SIZE // 2,
-                        c_y * TILE_SIZE + TILE_SIZE // 2,
-                    )
-                    pygame.draw.line(
-                        mega_connection_surface, (0, 255, 0), e_center, c_center, 1
+                    connection_key = tuple(
+                        sorted(
+                            [
+                                (entrance.x, entrance.y),
+                                (other_entrance.x, other_entrance.y),
+                            ]
+                        )
                     )
 
+                    if connection_key not in drawn_connections:
+                        drawn_connections.add(connection_key)
+                        c_center = (
+                            other_entrance.x * TILE_SIZE + TILE_SIZE // 2,
+                            other_entrance.y * TILE_SIZE + TILE_SIZE // 2,
+                        )
+                        pygame.draw.line(
+                            mega_connection_surface,
+                            CONNECTION_COLOR,
+                            e_center,
+                            c_center,
+                            PATH_LINE_WIDTH,
+                        )
+
+                pygame.draw.circle(
+                    mega_connection_surface,
+                    ENTRANCE_INDICATOR_COLOR,
+                    e_center,
+                    PATH_CIRCLE_RADIUS,
+                )
+
+def draw_chunk_grid():
+    for chunk_x in range(0, MAP_TILE_WIDTH // MAP_CHUNK_SIZE + 1):
+        x = chunk_x * CHUNK_PIXEL_SIZE
+        pygame.draw.line(
+            chunk_line_surface, GRID_COLOR, (x, 0), (x, SURFACE_HEIGHT), PATH_LINE_WIDTH
+        )
+        x *= MEGA_CHUNK_SIZE
+        pygame.draw.line(
+            mega_chunk_line_surface,
+            GRID_COLOR,
+            (x, 0),
+            (x, SURFACE_HEIGHT),
+            PATH_LINE_WIDTH,
+        )
+
+    for chunk_y in range(0, MAP_TILE_HEIGHT // MAP_CHUNK_SIZE + 1):
+        y = chunk_y * CHUNK_PIXEL_SIZE
+        pygame.draw.line(
+            chunk_line_surface, GRID_COLOR, (0, y), (SURFACE_WIDTH, y), PATH_LINE_WIDTH
+        )
+        y *= MEGA_CHUNK_SIZE
+        pygame.draw.line(
+            mega_chunk_line_surface,
+            GRID_COLOR,
+            (0, y),
+            (SURFACE_WIDTH, y),
+            PATH_LINE_WIDTH,
+        )
+
+
+def draw_chunks():
+    for chunk in chunks.values():
+        chunk.update_surface()
 
 def draw_abstractions():
     for chunk in chunks.values():
-        for node in chunk.nodes.values():
-            assert node.abstraction != None
-            abstraction: Abstraction = node.abstraction
-            rect = pygame.Rect(
-                node.x * TILE_SIZE, node.y * TILE_SIZE, TILE_SIZE, TILE_SIZE
-            )
-            # pygame.draw.rect(abstraction_surface, abstraction.color, rect, 0)
-            pygame.draw.rect(abstraction_surface, (33, 33, 33), rect, 0)
-
+        abstraction_surface.blit(
+            chunk.surface, (chunk.x * CHUNK_PIXEL_SIZE, chunk.y * CHUNK_PIXEL_SIZE)
+        )
 
 def draw_chunk_entrances():
+    chunk_entrance_surface.fill(BACKGROUND_COLOR)
     for chunk in chunks.values():
         for abstract in chunk.abstractions:
             for entrance in abstract.entrances.values():
                 rect = pygame.Rect(
                     entrance.x * TILE_SIZE, entrance.y * TILE_SIZE, TILE_SIZE, TILE_SIZE
                 )
-                pygame.draw.rect(chunk_entrance_surface, (255, 255, 255), rect, 1)
+                pygame.draw.rect(chunk_entrance_surface, ENTRANCE_COLOR, rect, 1)
+
+
+def draw_chunk_connections():
+    connection_surface.fill(BACKGROUND_COLOR)
+    for chunk in chunks.values():
+        for abstraction in chunk.abstractions:
+            for entrance in abstraction.entrances.values():
+                for connected_entrance in entrance.chunk_connections.values():
+                    e_center = (
+                        entrance.x * TILE_SIZE + TILE_SIZE // 2,
+                        entrance.y * TILE_SIZE + TILE_SIZE // 2,
+                    )
+                    c_center = (
+                        connected_entrance.x * TILE_SIZE + TILE_SIZE // 2,
+                        connected_entrance.y * TILE_SIZE + TILE_SIZE // 2,
+                    )
+                    pygame.draw.line(
+                        connection_surface,
+                        CONNECTION_COLOR,
+                        e_center,
+                        c_center,
+                        PATH_LINE_WIDTH,
+                    )
+
+
+def draw_mega_entrances():
+    mega_chunk_entrance_surface.fill(BACKGROUND_COLOR)
+    for mega_chunk in mega_chunks.values():
+        for cluster in mega_chunk.clusters:
+            for entrance in cluster.entrances.values():
+                rect = pygame.Rect(
+                    entrance.x * TILE_SIZE, entrance.y * TILE_SIZE, TILE_SIZE, TILE_SIZE
+                )
+                pygame.draw.rect(mega_chunk_entrance_surface, ENTRANCE_COLOR, rect, 1)
+
+def draw_mega_connections():
+    mega_connection_surface.fill(BACKGROUND_COLOR)
+    drawn_connections = set()
+
+    for mega_chunk in mega_chunks.values():
+        for cluster in mega_chunk.clusters:
+            for entrance in cluster.entrances.values():
+                e_center = (
+                    entrance.x * TILE_SIZE + TILE_SIZE // 2,
+                    entrance.y * TILE_SIZE + TILE_SIZE // 2,
+                )
+                for other_entrance in entrance.mega_chunk_connections.values():
+                    connection_key = tuple(
+                        sorted(
+                            [
+                                (entrance.x, entrance.y),
+                                (other_entrance.x, other_entrance.y),
+                            ]
+                        )
+                    )
+
+                    if connection_key not in drawn_connections:
+                        drawn_connections.add(connection_key)
+                        c_center = (
+                            other_entrance.x * TILE_SIZE + TILE_SIZE // 2,
+                            other_entrance.y * TILE_SIZE + TILE_SIZE // 2,
+                        )
+                        pygame.draw.line(
+                            mega_connection_surface,
+                            CONNECTION_COLOR,
+                            e_center,
+                            c_center,
+                            PATH_LINE_WIDTH,
+                        )
+                pygame.draw.circle(
+                    mega_connection_surface,
+                    ENTRANCE_INDICATOR_COLOR,
+                    e_center,
+                    PATH_CIRCLE_RADIUS,
+                )
 
 
 def draw_path(
-    path: List[Node], color: Color = (255, 0, 0), rect_size=1, lines=False
+    path: List[Node], color: Color = END_NODE_COLOR, rect_size=1, lines=False
 ) -> None:
     if not path:
         return
 
     prev_pos = None
-
     for node in path:
-        # Draw node as a rectangle
         rect = pygame.Rect(
             node.x * TILE_SIZE + pan_offset[0],
             node.y * TILE_SIZE + pan_offset[1],
@@ -738,36 +952,77 @@ def draw_path(
         prev_pos = (node.x, node.y)
 
 
-draw_abstractions()
-draw_chunk_entrances()
-draw_chunk_connections()
+def redraw_all_surfaces():
+    chunk_entrance_surface.fill(BACKGROUND_COLOR)
+    connection_surface.fill(BACKGROUND_COLOR)
+    mega_chunk_entrance_surface.fill(BACKGROUND_COLOR)
+    mega_connection_surface.fill(BACKGROUND_COLOR)
 
-draw_mega_entrances()
-draw_mega_connections()
-
-
-dt = time.time() - t
-print(f"- Drawing completed. Took {dt} seconds")
-
-
-dt = time.time() - total
-print(f"- Total time. Took {dt} seconds")
-
-
-# debug_panel = pygame_gui.elements.ui_panel.UIPanel(relative_rect=pygame.Rect((350, 275), (200, 70)), manager=manager, starting_height=2)
-# hello_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((350, 275), (100, 50)),
-#                                              text='Say Hello',
-#                                              manager=manager, parent_element=debug_panel, container=debug_panel, starting_height=1)
+    draw_chunk_entrances()
+    draw_chunk_connections()
+    draw_mega_entrances()
+    draw_mega_connections()
 
 
 def get_tile_from_mouse(pos: Tuple[int, int]) -> Pos:
-    """
-    Converts a mouse position (x, y) to a tile position (x, y).
-    """
     x, y = pos
     tile_x = (x - pan_offset[0]) // TILE_SIZE
     tile_y = (y - pan_offset[1]) // TILE_SIZE
     return tile_x, tile_y
+
+
+t = time.time()
+generate_tiles(zero_positions)
+print(f"- Tiles generated. Took {time.time() - t:.2f} seconds")
+
+draw_chunk_grid()
+
+t = time.time()
+for chunk in chunks.values():
+    flood_fill_chunk(chunk)
+print(f"- Chunks flood filled. Took {time.time() - t:.2f} seconds")
+
+t = time.time()
+for chunk in chunks.values():
+    generate_entrances(chunk)
+print(f"- Chunk entrances generated. Took {time.time() - t:.2f} seconds")
+
+t = time.time()
+for chunk in chunks.values():
+    make_connections(chunk)
+print(f"- Connections generated. Took {time.time() - t:.2f} seconds")
+
+t = time.time()
+for mega_chunk in mega_chunks.values():
+    clusters = generate_clusters(mega_chunk)
+    mega_chunk.clusters = clusters
+print(f"- Clusters generated. Took {time.time() - t:.2f} seconds")
+
+t = time.time()
+for mega_chunk in mega_chunks.values():
+    generate_mega_entrances(mega_chunk)
+print(f"- Mega Chunk entrances generated. Took {time.time() - t:.2f} seconds")
+
+for mega_chunk in mega_chunks.values():
+    update_mega_chunk_connections(mega_chunk)
+
+for mega_chunk in mega_chunks.values():
+    for chunk in mega_chunk.chunks.values():
+        for node in chunk.nodes.values():
+            rect = pygame.Rect(
+                node.x * TILE_SIZE, node.y * TILE_SIZE, TILE_SIZE, TILE_SIZE
+            )
+            pygame.draw.rect(cluster_color_surface, NODE_COLOR, rect, 0)
+
+t = time.time()
+draw_chunks()
+draw_abstractions()
+draw_chunk_entrances()
+draw_chunk_connections()
+draw_mega_entrances()
+draw_mega_connections()
+print(f"- Drawing completed. Took {time.time() - t:.2f} seconds")
+print(f"- Total time. Took {time.time() - total_time:.2f} seconds")
 
 
 layer = 1
@@ -775,28 +1030,33 @@ selected_surface = abstraction_surface
 selected_line_surface = chunk_line_surface
 selected_entrance_surface = chunk_entrance_surface
 selected_connection_surface = connection_surface
-start_node, end_node = None, None
-
-node_path = None
-graph_path = None
-cluster_path = None
-
-
+start_node = None
+end_node = None
 pan_offset = [0, 0]
-PAN_SPEED = 10
 
-clock = pygame.time.Clock()
-running = True
+debug_show_grid = True
+debug_show_entrances = True
+debug_show_connections = True
+debug_show_paths = True
+
+is_drag_deleting = False
+last_deleted_pos = None
+is_drag_adding = False
+last_added_pos = None
 
 
 entity = Entity(0, 0)
 
+clock = pygame.time.Clock()
+running = True
+
 while running:
-    dt = clock.tick(60) / 1000.0
+    dt = clock.tick(FPS) / 1000.0
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_1:
                 layer = 1
@@ -810,77 +1070,80 @@ while running:
                 selected_line_surface = mega_chunk_line_surface
                 selected_entrance_surface = mega_chunk_entrance_surface
                 selected_connection_surface = mega_connection_surface
-                
+
         elif event.type == pygame.MOUSEBUTTONDOWN:
+            mouse_pos = pygame.mouse.get_pos()
+            tile_pos = get_tile_from_mouse(mouse_pos)
+
             if event.button == 1:
-                mouse_pos = pygame.mouse.get_pos()
-                tile_pos = get_tile_from_mouse(mouse_pos)
-                node = get_node(tile_pos)
-                if node:
-                    start_node = node
-                    entity.x, entity.y = (
-                        start_node.x * TILE_SIZE,
-                        start_node.y * TILE_SIZE,
-                    )
+                keys = pygame.key.get_pressed()
+                if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
+                    is_drag_adding = True
+                    last_added_pos = tile_pos
+                    add_node(tile_pos)
+                else:
+                    node = get_node(tile_pos)
+                    if node:
+                        start_node = node
+                        entity.x, entity.y = (
+                            start_node.x * TILE_SIZE,
+                            start_node.y * TILE_SIZE,
+                        )
 
-                if start_node and end_node:
-                    if start_node == end_node:
-                        cluster_path = None
-                        node_path = None
-                        graph_path = None
-                        continue
-
-                    cluster_path = GraphAStar(start_node, end_node, 2)
-                    cluster_start = cluster_path[0]
-                    cluster_next = cluster_path[1]
-                    graph_path = GraphAStar(
-                        get_node((cluster_start.x, cluster_start.y)),
-                        get_node((cluster_next.x, cluster_next.y)),
-                        1,
-                    )
-                    node_path = NodeAStar(
-                        get_node((graph_path[0].x, graph_path[0].y)),
-                        get_node((graph_path[1].x, graph_path[1].y)),
-                    )
-
-                    entity.pathfind(end_node)
+                        if start_node and end_node and start_node != end_node:
+                            entity.pathfind(end_node)
 
             elif event.button == 3:
-                entity.level_0_path.clear()
-                entity.level_1_path.clear()
-                entity.level_2_path.clear()
-                
+                keys = pygame.key.get_pressed()
+                if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
+                    is_drag_deleting = True
+                    last_deleted_pos = tile_pos
+                    remove_node(tile_pos)
+                    
+                else:
+                    node = get_node(tile_pos)
+                    if node:
+                        end_node = node
+                        entity.level_0_path.clear()
+                        entity.level_1_path.clear()
+                        entity.level_2_path.clear()
+
+                        if start_node and end_node and start_node != end_node:
+                            entity.x, entity.y = (
+                                start_node.x * TILE_SIZE,
+                                start_node.y * TILE_SIZE,
+                            )
+                            entity.pathfind(end_node)
+
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1 or event.button == 3:
+                is_drag_deleting = False
+                last_deleted_pos = None
+                is_drag_adding = False
+                last_added_pos = None
+
+        elif event.type == pygame.MOUSEMOTION:
+            if is_drag_deleting:
                 mouse_pos = pygame.mouse.get_pos()
                 tile_pos = get_tile_from_mouse(mouse_pos)
-                node = get_node(tile_pos)
-                if node:
-                    end_node = node
 
-                if start_node and end_node:
-                    if start_node == end_node:
-                        cluster_path = None
-                        node_path = None
-                        graph_path = None
-                        continue
-                    entity.x, entity.y = (
-                        start_node.x * TILE_SIZE,
-                        start_node.y * TILE_SIZE,
-                    )
-                    cluster_path = GraphAStar(start_node, end_node, 2)
-                    cluster_start = cluster_path[0]
-                    cluster_next = cluster_path[1]
-                    graph_path = GraphAStar(
-                        get_node((cluster_start.x, cluster_start.y)),
-                        get_node((cluster_next.x, cluster_next.y)),
-                        1,
-                    )
-                    node_path = NodeAStar(
-                        get_node((graph_path[0].x, graph_path[0].y)),
-                        get_node((graph_path[1].x, graph_path[1].y)),
-                    )
-                    entity.pathfind(end_node)
+                if tile_pos != last_deleted_pos and last_deleted_pos is not None:
+                    fill_line_with_action(last_deleted_pos, tile_pos, remove_node)
+                elif last_deleted_pos is None:
+                    remove_node(tile_pos)
 
-        manager.process_events(event)
+                last_deleted_pos = tile_pos
+
+            elif is_drag_adding:
+                mouse_pos = pygame.mouse.get_pos()
+                tile_pos = get_tile_from_mouse(mouse_pos)
+
+                if tile_pos != last_added_pos and last_added_pos is not None:
+                    fill_line_with_action(last_added_pos, tile_pos, add_node)
+                elif last_added_pos is None:
+                    add_node(tile_pos)
+
+                last_added_pos = tile_pos
 
     keys = pygame.key.get_pressed()
     if keys[pygame.K_w]:
@@ -892,13 +1155,33 @@ while running:
     if keys[pygame.K_d]:
         pan_offset[0] -= PAN_SPEED
 
-    manager.update(dt)
+    entity.update(dt)
 
-    screen.fill((0, 0, 0))
+    screen.fill(BACKGROUND_COLOR)
     screen.blit(selected_surface, pan_offset)
-    screen.blit(selected_line_surface, pan_offset)
-    screen.blit(selected_entrance_surface, pan_offset)
-    screen.blit(selected_connection_surface, pan_offset)
+
+    if debug_show_grid:
+        screen.blit(selected_line_surface, pan_offset)
+    if debug_show_entrances:
+        screen.blit(selected_entrance_surface, pan_offset)
+    if debug_show_connections:
+        screen.blit(selected_connection_surface, pan_offset)
+
+    mouse_pos = pygame.mouse.get_pos()
+    tile_pos = get_tile_from_mouse(mouse_pos)
+    rect = pygame.Rect(
+        tile_pos[0] * TILE_SIZE + pan_offset[0],
+        tile_pos[1] * TILE_SIZE + pan_offset[1],
+        TILE_SIZE,
+        TILE_SIZE,
+    )
+    pygame.draw.rect(screen, ENTRANCE_COLOR, rect, 1)
+
+    font = pygame.font.Font(None, FONT_SIZE)
+    tile_text = font.render(f"Tile: {tile_pos[0]}, {tile_pos[1]}", True, ENTRANCE_COLOR)
+    screen.blit(
+        tile_text, (mouse_pos[0] + UI_TEXT_OFFSET, mouse_pos[1] + UI_TEXT_OFFSET)
+    )
 
     if start_node:
         rect = pygame.Rect(
@@ -907,7 +1190,8 @@ while running:
             TILE_SIZE,
             TILE_SIZE,
         )
-        pygame.draw.rect(screen, (0, 0, 255), rect, 0)
+        pygame.draw.rect(screen, START_NODE_COLOR, rect, 0)
+
     if end_node:
         rect = pygame.Rect(
             end_node.x * TILE_SIZE + pan_offset[0],
@@ -915,19 +1199,20 @@ while running:
             TILE_SIZE,
             TILE_SIZE,
         )
-        pygame.draw.rect(screen, (255, 0, 0), rect, 0)
-    if entity.level_0_path:
-        draw_path(entity.level_0_path, color=(0, 255, 0))
-    if entity.level_1_path:
-        draw_path(entity.level_1_path, color=(255, 255, 0), lines=True)
-    if entity.level_2_path:
-        draw_path(entity.level_2_path, color=(255, 0, 255), lines=True)
+        pygame.draw.rect(screen, END_NODE_COLOR, rect, 0)
 
-    manager.draw_ui(screen)
+    if debug_show_paths:
+        if entity.level_0_path:
+            draw_path(entity.level_0_path, color=PATH_LEVEL_0_COLOR)
+        if entity.level_1_path:
+            draw_path(entity.level_1_path, color=PATH_LEVEL_1_COLOR, lines=True)
+        if entity.level_2_path:
+            draw_path(entity.level_2_path, color=PATH_LEVEL_2_COLOR, lines=True)
+
     rect = pygame.Rect(
         entity.x + pan_offset[0], entity.y + pan_offset[1], TILE_SIZE, TILE_SIZE
     )
-    pygame.draw.rect(screen, (255, 255, 255), rect, 0)
+    pygame.draw.rect(screen, ENTITY_COLOR, rect, 0)
 
     if entity.target_node:
         rect = pygame.Rect(
@@ -936,9 +1221,9 @@ while running:
             TILE_SIZE,
             TILE_SIZE,
         )
-        pygame.draw.rect(screen, (255, 0, 0), rect, 1)
-
-    entity.update(dt)
+        pygame.draw.rect(screen, TARGET_NODE_COLOR, rect, 1)
 
     pygame.display.set_caption(f"FPS: {clock.get_fps():.2f}")
     pygame.display.update()
+
+pygame.quit()
