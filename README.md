@@ -209,4 +209,10 @@ Traditional pathfinding algorithms become computationally expensive on large map
 
 ---
 
+## Coming soon
+- Low-level flow feild pathfinding for large groups of entities within the same chunk.
+- LOS pathfinding and path refinment for smoother pathfinding.
+- UI for debugging and testing the program with over keyboard buttons.
+- Possibly more layers, or dynamic layer creation based on the map size.
+
 **Performance tested on maps with varying complexity - results may vary based on map structure and unit movement speed.*
