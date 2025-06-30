@@ -5,28 +5,18 @@ from settings import TILE_SIZE
 
 class Entity:
     def __init__(self, node_x: int, node_y: int, speed: float = 30):
-        """
-        Entity that moves along a hierarchical path.
-
-        :param node_x: Initial x tile position
-        :param node_y: Initial y tile position
-        :param speed: Movement speed in pixels per second
-        """
         self.x: float = node_x * TILE_SIZE
         self.y: float = node_y * TILE_SIZE
-        self.speed = speed  # Movement speed
+        self.speed = speed
 
         self.level_2_path = []  # Mega Chunk path (Layer 2)
         self.level_1_path = []  # Chunk path (Layer 1)
         self.level_0_path = []  # Tile path (Layer 0)
-        self.target_node = None  # Next node entity is moving toward
-        self.goal_node = None  # Final node entity is moving toward
+        self.target_node = None
+        self.goal_node = None
 
     @property
     def current_node(self):
-        """
-        Returns the closest tile-based node based on the entity's position.
-        """
         node_x = round(self.x / TILE_SIZE)
         node_y = round(self.y / TILE_SIZE)
         return get_node((node_x, node_y))
@@ -38,18 +28,19 @@ class Entity:
         )
         if raycast_valid:
             self.target_node = self.goal_node
+            self.level_0_path.clear()
+            self.level_1_path.clear()
+            self.level_2_path.clear()
             return True
 
-        # Clear existing paths
         self.level_2_path.clear()
         self.level_1_path.clear()
         self.level_0_path.clear()
 
-        # Compute Level 2 Path (Mega Chunk Pathfinding)
         self.level_2_path = GraphAStar(self.current_node, end_node, layer=2)
 
         if not self.level_2_path:
-            return False  # No path found
+            return False
 
         self.compute_next_level_1_path()
 
@@ -84,7 +75,6 @@ class Entity:
                 if self.level_2_path:
                     self.compute_next_level_1_path()
 
-    # LEVEL 0 ONLY
     def move_toward_target(self, dt: float):
         if not self.target_node:
             return
@@ -103,7 +93,7 @@ class Entity:
             if self.level_0_path:
                 self.target_node = self.level_0_path.pop(0)
             else:
-                self.target_node = None  # Done with this path segment
+                self.target_node = None
         else:
             self.x += (dx / distance) * self.speed * dt
             self.y += (dy / distance) * self.speed * dt
