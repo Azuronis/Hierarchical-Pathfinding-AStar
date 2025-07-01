@@ -215,4 +215,7 @@ Traditional pathfinding algorithms become computationally expensive on large map
 - UI for debugging and testing the program with over keyboard buttons.
 - Possibly more layers, or dynamic layer creation based on the map size.
 
+## 📄 License
+This project is licensed under the MIT License - see the [LICENCE](./licence) file for details.
+
 **Performance tested on maps with varying complexity - results may vary based on map structure and unit movement speed.*
