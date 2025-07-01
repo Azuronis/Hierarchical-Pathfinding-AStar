@@ -4,7 +4,7 @@ An optimized pathfinding implementation that uses hierarchical pathfinding over 
 
 ## Overview
 
-This project demonstrates hierarchical pathfinding - an advanced optimization technique that divides large maps into manageable chunks connected through entrance nodes. Instead of calculating paths across entire maps, the algorithm creates an abstract graph structure that dramatically reduces computational complexity and calculates the path as the actor/entity moves.
+Instead of having your pathfinding algorithm struggle through massive maps, this approach splits everything into manageable pieces. Think of it like continuous short distance pathfinding - you don't pathfind from start to finish and get a full, finished path. You figure out which chunks need to be accessed, and form a plan based on that. Once you have a plan, you can pathfind to each step one at a time.
 
 ## Performance
 
@@ -176,7 +176,7 @@ This implementation is based on established research in hierarchical pathfinding
 ## Getting Started
 
 ### Prerequisites
-- Python 3.7+
+- Python 3.10+
 - Pygame-CE library
 
 ### Installation
