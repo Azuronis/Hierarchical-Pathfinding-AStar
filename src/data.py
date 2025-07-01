@@ -23,6 +23,7 @@ import settings
 Pos = tuple[int, int]  # (x, y) coordinate tuple
 Color = tuple[int, int, int]  # RGB color tuple  
 Matrix_2D = list[list[int]]  # 2D matrix of integers
+PosPairs = list[tuple[Pos, Pos]] # List of Position pairs
 
 # Each abstraction, cluster, chunk, and mega-chunk gets a unique color for visualization (debugging)
 COLOR_PALETTE = [

@@ -74,6 +74,7 @@ from data import (
     MegaChunk,
     Pos,
     Color,
+    PosPairs,
     chunks,
     mega_chunks,
 )
@@ -239,7 +240,7 @@ def flood_fill_chunk(chunk: Chunk):
                         neighbor_node.connections[node_pos] = node
 
 
-def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
+def make_chunk_entrances(chunk_pos: Pos, direction: str, entrance_size: int = 1) -> None:
     """
     Creates entrance points between a chunk and its neighbor along a specified direction.
     
@@ -303,8 +304,8 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
     if not neighbor_chunk:
         return
 
-    groups: list[list[tuple[Pos, Pos]]] = []
-    current_group: list[tuple[Pos, Pos]] = []
+    groups: list[PosPairs] = []
+    current_group: PosPairs = []
 
     # Filter candidate pairs to only include walkable connections
     # Group continuous walkable paths together
@@ -321,9 +322,26 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
     if current_group:
         groups.append(current_group)
 
+    half_entrance_size = entrance_size // 2 # 1//2 = 0 for entrance size = 1
+
     # Create entrance points at regular intervals within each continuous group
     for group in groups:
-        entrances: list[tuple[Pos, Pos]] = []
+
+        # TODO : https://harablog.wordpress.com/2009/02/05/hierarchical-clearance-based-pathfinding/
+        # Finish the clearance based entrance spacing for connecting entrances. 
+        
+        valid_entrances: PosPairs = [] # valid entrances for variable entrance size
+        group_length = len(group)
+        if group_length < entrance_size: # if the entrance size is greater than the group length just skip the group
+            continue
+        start_index = half_entrance_size
+        end_index = group_length - half_entrance_size
+
+        for i in range(start_index, end_index):
+            valid_entrances.append(group[i])
+        group = valid_entrances # re-assign the group candidates with the valid ones.
+
+        entrances: PosPairs = []
         for i in range(0, len(group), ENTRANCE_SPACING):
             group_slice = group[i : i + ENTRANCE_SPACING]
             middle_index = len(group_slice) // 2  # Grab the middle node
