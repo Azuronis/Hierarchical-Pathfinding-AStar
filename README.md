@@ -6,6 +6,8 @@ An optimized pathfinding implementation that uses hierarchical pathfinding over 
 
 Instead of having your pathfinding algorithm struggle through massive maps, this approach splits everything into manageable pieces. Think of it like continuous short distance pathfinding - you don't pathfind from start to finish and get a full, finished path. You figure out which chunks need to be accessed, and form a plan based on that. Once you have a plan, you can pathfind to each step one at a time.
 
+Since materials on this algorithm online are scarce, I decided to create an open-source demo available to anyone.
+
 ## Performance
 
 - **100x average performance increase** compared to standard A* pathfinding
