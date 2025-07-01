@@ -174,6 +174,7 @@ This implementation is based on established research in hierarchical pathfinding
 
 1. **[Near Optimal Hierarchical Pathfinding (HPA*)](https://webdocs.cs.ualberta.ca/~mmueller/ps/hpastar.pdf)** - Foundational algorithm for efficient pathfinding in large maps
 2. **[Hierarchical Dynamic Pathfinding](https://ubm-twvideo01.s3.amazonaws.com/o1/vault/gdc2018/presentations/Alain_Benoit_HierarchicalDynamicPathfinding.pdf)** - Application in dynamic environments
+3. **[hierarchical-clearance](https://harablog.wordpress.com/2009/02/05/hierarchical-clearance-based-pathfinding/)** - Variable sized entrance spacing for certain sized entities. 
 
 ## Getting Started
 
