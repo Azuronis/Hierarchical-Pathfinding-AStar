@@ -55,11 +55,9 @@ from data import (
 )
 from entity import Entity
 import pygame
-from typing import Tuple, Set, List
 import time
 from collections import deque
 import ctypes
-import math
 
 
 pygame.font.init()
@@ -71,7 +69,7 @@ WIDTH, HEIGHT = (
     screen_height // SCREEN_SCALE_FACTOR,
 )
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=1)
+screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=True)
 
 OFFSET = SURFACE_OFFSET
 OFFSET_WIDTH = SURFACE_WIDTH + OFFSET
@@ -108,11 +106,19 @@ zero_positions = {
 
 
 
-def generate_tiles(positions: Set[Pos]):
+def generate_tiles(positions: set[Pos]):
+    """
+    This will go through all node positions and assign them to chunks. 
+    Chunks and Mega Chunks are also generated based on node positions.
+
+
+    Args:
+        positions (set[Pos]): a set of Pos tuples.)
+    """
     for x, y in positions:
         chunk_pos = x // MAP_CHUNK_SIZE, y // MAP_CHUNK_SIZE
 
-        chunk = chunks.get(chunk_pos)
+        chunk = chunks.get(chunk_pos) # generate chunk if it doesnt exist.
         if not chunk:
             chunk = Chunk(chunk_pos[0], chunk_pos[1])
             chunks[chunk_pos] = chunk
@@ -122,7 +128,7 @@ def generate_tiles(positions: Set[Pos]):
             chunk_pos[0] // MEGA_CHUNK_SIZE,
             chunk_pos[1] // MEGA_CHUNK_SIZE,
         )
-        mega_chunk = mega_chunks.get(mega_chunk_pos)
+        mega_chunk = mega_chunks.get(mega_chunk_pos) # generate mega chunk if it doesnt exist
         if not mega_chunk:
             mega_chunk = MegaChunk(mega_chunk_pos[0], mega_chunk_pos[1])
             mega_chunks[mega_chunk_pos] = mega_chunk
@@ -132,11 +138,18 @@ def generate_tiles(positions: Set[Pos]):
 
 
 def flood_fill_chunk(chunk: Chunk):
-    chunk.abstractions.clear()
+    """
+    Flood fill each chunk and generate abstractions. Abstractions are stored inside chunks.
 
+    Args:
+        chunk (Chunk): Chunk object
+    """
+
+    chunk.abstractions.clear() # clear previous abstractions
+    
     for node in chunk.nodes.values():
         node.abstraction = None
-        node.connections.clear()
+        node.connections.clear() # clear previous node connections
 
     chunk_nodes = list(chunk.nodes.keys())
     visited = set()
@@ -147,7 +160,7 @@ def flood_fill_chunk(chunk: Chunk):
             continue
 
         queue = deque([start_pos])
-        abstraction = Abstraction()
+        abstraction = Abstraction() # create new abstraction for a new flood fill
         chunk.abstractions.add(abstraction)
 
         while queue:
@@ -157,8 +170,9 @@ def flood_fill_chunk(chunk: Chunk):
 
             visited.add(node_pos)
             node = chunk.nodes[node_pos]
-            node.abstraction = abstraction
+            node.abstraction = abstraction # re-assign the nodes to their abstraction
 
+            # add neighbors to the flood fill and continue
             for neighbor_pos in get_neighbors(node.x, node.y):
                 if neighbor_pos in chunk.nodes and neighbor_pos not in visited:
                     queue.append(neighbor_pos)
@@ -171,9 +185,18 @@ def flood_fill_chunk(chunk: Chunk):
 
 
 def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
-    chunk = chunks[chunk_pos]
-    edge_range = range(MAP_CHUNK_SIZE)
+    """
+    This will go along a specified side and generate entrances for the chunk
 
+    Args:
+        chunk_pos (Pos): (int, int)
+        direction (str): "top", "bottom", "left", "right"
+    """
+
+    chunk = chunks[chunk_pos]
+    edge_range = range(MAP_CHUNK_SIZE) # edge range is the size of the chunk
+
+    # generate candidate pairs. All possible entrances along the side
     if direction == "top":
         neighbor_pos = (chunk_pos[0], chunk_pos[1] - 1)
         start_x, start_y = chunk_pos[0] * MAP_CHUNK_SIZE, chunk_pos[1] * MAP_CHUNK_SIZE
@@ -214,8 +237,11 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
     if not neighbor_chunk:
         return
 
-    groups: List[List[Tuple[Pos, Pos]]] = []
-    current_group: List[Tuple[Pos, Pos]] = []
+    groups: list[list[tuple[Pos, Pos]]] = []
+    current_group: list[tuple[Pos, Pos]] = []
+
+    # filter the candidate pairs since we dont need MAP_CHUNK_SIZE entrances.
+    # Usually around 1 entrance per continous side.
 
     for pair in candidate_pairs:
         chunk_node_pos, neighbor_node_pos = pair
@@ -231,10 +257,10 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
         groups.append(current_group)
 
     for group in groups:
-        entrances: List[Tuple[Pos, Pos]] = []
+        entrances: list[tuple[Pos, Pos]] = []
         for i in range(0, len(group), ENTRANCE_SPACING):
             group_slice = group[i : i + ENTRANCE_SPACING]
-            middle_index = len(group_slice) // 2
+            middle_index = len(group_slice) // 2 # grab the middle node
             entrances.append(group_slice[middle_index])
 
         for chunk_node_pos, neighbor_node_pos in entrances:
@@ -243,7 +269,7 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
 
             if not chunk_node or not neighbor_node:
                 continue
-
+            
             chunk_abstract = chunk_node.abstraction
             neighbor_abstract = neighbor_node.abstraction
 
@@ -252,6 +278,7 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
             
             chunk_graph_node = chunk_abstract.entrances.get(chunk_node_pos)
             if not chunk_graph_node:
+                # create a GraphNode which will be used for pathfinding.
                 chunk_graph_node = GraphNode(chunk_node_pos, chunk_abstract)
                 chunk_abstract.entrances[(chunk_graph_node.x, chunk_graph_node.y)] = (
                     chunk_graph_node
@@ -259,6 +286,7 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
 
             neighbor_graph_node = neighbor_abstract.entrances.get(neighbor_node_pos)
             if not neighbor_graph_node:
+                # create a GraphNode for the neighbor as well since the pair has been made.
                 neighbor_graph_node = GraphNode(neighbor_node_pos, neighbor_abstract)
                 neighbor_abstract.entrances[
                     (neighbor_graph_node.x, neighbor_graph_node.y)
@@ -272,8 +300,15 @@ def make_chunk_entrances(chunk_pos: Pos, direction: str) -> None:
             ] = chunk_graph_node
 
 
+# TODO consider making the sides and Enum
 def generate_entrances(chunk: Chunk) -> None:
-    for abstraction in chunk.abstractions:
+    """
+    Will iterate through each side ("top", "right", "bottom", "left") and generate entrances
+
+    Args:
+        chunk (Chunk): Chunk object
+    """
+    for abstraction in chunk.abstractions: # clear all abstraction entrances since new graph nodes are created
         abstraction.entrances.clear()
 
     cx, cy = chunk.x, chunk.y
@@ -284,6 +319,12 @@ def generate_entrances(chunk: Chunk) -> None:
 
 
 def make_connections(chunk: Chunk) -> None:
+    """
+    Connect all entrance nodes within the same chunk, and within the same abstraction to eachother.
+
+    Args:
+        chunk (Chunk): Chunk object
+    """
     for abstraction in chunk.abstractions:
         entrances_list = list(abstraction.entrances.values())
         for i, entrance in enumerate(entrances_list):
@@ -293,11 +334,22 @@ def make_connections(chunk: Chunk) -> None:
                         other_entrance
                     )
 
-def generate_clusters(mega_chunk: MegaChunk) -> Set[Cluster]:
+def generate_clusters(mega_chunk: MegaChunk) -> set[Cluster]:
+    """
+    Flood fill the connections within ( 3 x 3 ) chunks to form a larger abstraction. This is called a Cluster
+    Clusters are the same as an Abstraction, just larger and made for a MegaChunk.
 
-    all_entrances: Set[GraphNode] = set()
+    Args:
+        mega_chunk (MegaChunk): MegaChunk object
+
+    Returns:
+        set[Cluster]: returns a set of newly created Cluster objects
+    """
+
+    all_entrances: set[GraphNode] = set()
     clusters: set[Cluster] = set()
 
+    # store all entrances for floodfill
     for chunk in mega_chunk.chunks.values():
         for abstraction in chunk.abstractions:
             if len(abstraction.entrances) == 0:
@@ -308,7 +360,8 @@ def generate_clusters(mega_chunk: MegaChunk) -> Set[Cluster]:
             else:
                 all_entrances.update(abstraction.entrances.values())
     processed_entrances: set[GraphNode] = set()
-
+     
+    # flood fill entrances and store Abstractions in the Cluster
     while all_entrances:
         start_entrance = all_entrances.pop()
         queue = deque([start_entrance])
@@ -339,7 +392,15 @@ def generate_clusters(mega_chunk: MegaChunk) -> Set[Cluster]:
 
 
 def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
-    edge_range = range(MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE)
+    """
+    Same process as generating normal chunk entrances.
+    Uses current chunk entrances , stores them all, and picks middle nodes out of continous lines.
+
+    Args:
+        mega_chunk_pos (Pos): (int, int)
+        direction (str): "top", "bottom", "left", "right"
+    """
+    edge_range = range(MAP_CHUNK_SIZE * MEGA_CHUNK_SIZE) # chunk size * how many chunks in each mega chunk
 
     if direction == "top":
         start_x, start_y = (
@@ -379,7 +440,8 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
         ]
     else:
         return
-
+    
+    # store all of the mega chunks, chunk entrances
     pairs = []
     for pair in candidate_pairs:
         node_pos, neighbor_pos = pair
@@ -459,8 +521,14 @@ def make_mega_chunk_entrances(mega_chunk_pos: Pos, direction: str) -> None:
 
 
 def generate_mega_entrances(mega_chunk: MegaChunk) -> None:
+    """
+    Generates mega chunk entrances given a MegaChunk object. Stores entrances in the MegaChunk clusters.
+
+    Args:
+        mega_chunk (MegaChunk): MegaChunk object
+    """
     for cluster in mega_chunk.clusters:
-        cluster.entrances.clear()
+        cluster.entrances.clear() # clear all cluster entrances for generation
 
     cx, cy = mega_chunk.x, mega_chunk.y
     make_mega_chunk_entrances((cx, cy), "top")
@@ -470,6 +538,11 @@ def generate_mega_entrances(mega_chunk: MegaChunk) -> None:
 
 
 def update_mega_chunk_connections(mega_chunk: MegaChunk) -> None:
+    """
+
+    Args:
+        mega_chunk (MegaChunk): _description_
+    """
     all_entrances = []
     for cluster in mega_chunk.clusters:
         all_entrances.extend(cluster.entrances.values())
@@ -923,7 +996,7 @@ def draw_mega_connections():
 
 
 def draw_path(
-    path: List[Node], color: Color = END_NODE_COLOR, rect_size=1, lines=False
+    path: list[Node] | list[GraphNode], color: Color = END_NODE_COLOR, rect_size=1, lines=False
 ) -> None:
     if not path:
         return
@@ -964,7 +1037,7 @@ def redraw_all_surfaces():
     draw_mega_connections()
 
 
-def get_tile_from_mouse(pos: Tuple[int, int]) -> Pos:
+def get_tile_from_mouse(pos: tuple[int, int]) -> Pos:
     x, y = pos
     tile_x = (x - pan_offset[0]) // TILE_SIZE
     tile_y = (y - pan_offset[1]) // TILE_SIZE
