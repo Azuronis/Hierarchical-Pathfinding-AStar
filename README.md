@@ -181,12 +181,13 @@ This implementation is based on established research in hierarchical pathfinding
 ### Prerequisites
 - Python 3.10+
 - Pygame-CE library
+- noise library
 
 ### Installation
 ```bash
 git clone https://github.com/Azuronis/hierarchical-pathfinding-astar.git
 cd hierarchical-pathfinding-astar
-pip install pygame-ce
+pip install pygame-ce noise
 ```
 
 ### Running the Demo
