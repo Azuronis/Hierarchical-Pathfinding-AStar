@@ -1,3 +1,5 @@
+# v1.5.2
+
 # Hierarchical Pathfinding A*
 
 An optimized pathfinding implementation that uses hierarchical pathfinding over traditional A* pathfinding on large maps.
@@ -218,6 +220,13 @@ Traditional pathfinding algorithms become computationally expensive on large map
 - LOS pathfinding and path refinment for smoother pathfinding.
 - UI for debugging and testing the program with over keyboard buttons.
 - Possibly more layers, or dynamic layer creation based on the map size.
+
+
+## Preview for V2
+<img width="872" height="880" alt="image" src="https://github.com/user-attachments/assets/05e435cb-b676-460d-a15d-6e8b911c9902" />
+Lots of fixes to the pathfinding coming in V2.
+Namely V2 will not just have rough path planning but a decent version of path refinement, more debug and visualization tools, dynamic hierachies for any sized map and more. 
+V2 will also be much more memory efficient in terms of node storage, creation, and surfaces in Pygame for rendering. 
 
 ## 📄 License
 This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
