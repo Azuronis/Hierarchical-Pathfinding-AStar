@@ -16,6 +16,7 @@
 
 ## Technical Implementation
 
+
 ### Hierarchical Structure
 - **Chunk**: 11×11 tile regions containing abstractions of connected areas
 - **Abstraction**: Connected walkable regions within chunks (via flood-fill)
@@ -36,6 +37,8 @@ This implementation is based on established research in hierarchical pathfinding
 - Better memory control for surfaces and rendering
 - Better memory for node storage. (No more OOP for them)
 - Dynamic Chunk Loading and Creation
+
+https://github.com/user-attachments/assets/4912f17a-b9a8-4ad0-b2eb-fc1107ea0399
 
 
 ## 📄 License
