@@ -1,7 +1,20 @@
+from pathlib import Path
+import numpy as np
+import json
+import os
 
-MAP_TILE_WIDTH = 100
-MAP_TILE_HEIGHT = 100
+MAP_NAME = "TEST_MAP_(500x500)"
+
 TILE_SIZE = 10
+
+DEPTH_COLORS = [
+    (255,  64,  64, 40),
+    ( 64, 255,  64, 40),
+    ( 64, 128, 255, 40),
+    (255, 200,  64, 40),
+    (255,  64, 200, 40),
+    ( 64, 255, 255, 40),
+]
 
 BACKGROUND_COLOR = (0, 0, 0, 0)
 NODE_COLOR = (33, 33, 33, 255)
@@ -23,11 +36,7 @@ MAP_CHUNK_SIZE = 11 # number of tiles per chunk
 ENTRANCE_SPACING = MAP_CHUNK_SIZE
 CHUNK_PIXEL_SIZE = TILE_SIZE * MAP_CHUNK_SIZE
 
-SURFACE_WIDTH = TILE_SIZE * MAP_TILE_WIDTH
-SURFACE_HEIGHT = TILE_SIZE * MAP_TILE_HEIGHT
-
-MEGA_CHUNK_SIZE = 3  # number of chunks per mega chunk
-MEGA_CHUNK_PIXEL_SIZE = CHUNK_PIXEL_SIZE * MEGA_CHUNK_SIZE
+CHUNK_SCALE_FACTOR = 3  # number of chunks per mega chunk
 
 SCREEN_SCALE_FACTOR = 1.2  # factor to scale screen size
 SURFACE_OFFSET = 1
@@ -42,3 +51,24 @@ NOISE_OCTAVES = 5
 
 PATH_LINE_WIDTH = 1
 PATH_CIRCLE_RADIUS = 2
+
+
+
+
+HERE = Path(__file__).resolve().parent
+MAP_FILE_PATH = str(HERE / "maps" / MAP_NAME / MAP_NAME)
+json_path = MAP_FILE_PATH + ".json"
+
+meta = None
+height, width = 1000, 1000
+if os.path.exists(json_path):
+    with open(json_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+if meta:
+    height, width = meta['height'], meta['width']
+
+MAP_TILE_WIDTH = width
+MAP_TILE_HEIGHT = height
+
+SURFACE_WIDTH = TILE_SIZE * MAP_TILE_WIDTH
+SURFACE_HEIGHT = TILE_SIZE * MAP_TILE_HEIGHT

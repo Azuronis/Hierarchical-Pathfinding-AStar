@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "dtype": "bool",
+  "height": 1000,
+  "width": 1000,
+  "map_chunk_size": 11
+}
